@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Keep PC Awake + Media</title>
+</head>
+<body>
+  <h1>🟢 Stay Awake & Active</h1>
+  <button id="start">Start</button>
+  <button id="stop">Stop</button>
+
+  <!-- Hidden background video -->
+  <video id="bgVideo" autoplay loop muted playsinline style="display:none">
+    <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+  </video>
+
+  <script>
+    let wakeLock = null;
+    const bgVideo = document.getElementById("bgVideo");
+
+    async function start() {
+      try {
+        // Request wake lock
+        wakeLock = await navigator.wakeLock.request("screen");
+        console.log("Wake Lock active");
+
+        // Play hidden video
+        await bgVideo.play();
+        console.log("Background video playing");
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function stop() {
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+      bgVideo.pause();
+      console.log("Stopped");
+    }
+
+    document.getElementById("start").addEventListener("click", start);
+    document.getElementById("stop").addEventListener("click", stop);
+  </script>
+</body>
+</html>
