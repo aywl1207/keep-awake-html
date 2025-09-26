@@ -1,48 +1,343 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Keep PC Awake + Media</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Stay Awake</title>
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='22' fill='%2300C853'/%3E%3Ctext x='24' y='29' text-anchor='middle' font-size='20' fill='white' font-family='monospace'%3EAW%3C/text%3E%3C/svg%3E" />
+
+  <style>
+    :root {
+      --bg: #0f141a;
+      --bg-soft: #121821;
+      --card: #171f2a;
+      --text: #e9eef5;
+      --muted: #a9b4c0;
+      --primary: #00c853;
+      --primary-600: #00a344;
+      --danger: #ff5252;
+      --ring: rgba(0, 200, 83, 0.25);
+      --shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f7fb;
+        --bg-soft: #eef2f8;
+        --card: #ffffff;
+        --text: #101318;
+        --muted: #5c6672;
+        --primary: #00c853;
+        --primary-600: #00a344;
+        --danger: #e53935;
+        --ring: rgba(0, 200, 83, 0.18);
+        --shadow: 0 10px 30px rgba(18, 24, 33, 0.08);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Ubuntu, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      background:
+        radial-gradient(1200px 600px at 10% 10%, rgba(0, 200, 83, 0.06), transparent 60%),
+        radial-gradient(1000px 500px at 90% 90%, rgba(0, 200, 83, 0.06), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 720px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .header {
+      padding: 24px 24px 16px;
+      background: linear-gradient(180deg, var(--bg-soft), transparent 70%);
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 0 6px rgba(229, 57, 53, 0.12);
+      transition: all 200ms ease;
+    }
+    .dot.on {
+      background: var(--primary);
+      box-shadow: 0 0 0 6px var(--ring);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0.2px;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      padding: 16px 24px 8px;
+    }
+
+    button {
+      appearance: none;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 16px;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      transition: transform 80ms ease, box-shadow 160ms ease, background 160ms ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .start {
+      background: var(--primary);
+      color: #0c1a10;
+      box-shadow: 0 8px 16px rgba(0, 200, 83, 0.25);
+    }
+    .start:hover { background: var(--primary-600); }
+    .start:active { transform: translateY(1px); }
+
+    .stop {
+      background: #2a3340;
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .stop:hover { background: #313a48; }
+    .stop:active { transform: translateY(1px); }
+
+    .status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 24px 20px;
+    }
+
+    .pill {
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .log {
+      max-height: 140px;
+      overflow: auto;
+      background: rgba(255,255,255,0.03);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      border-bottom-left-radius: 20px;
+      border-bottom-right-radius: 20px;
+      padding: 14px 18px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .tip {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 0 24px 18px;
+    }
+
+    .kbd {
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px;
+    }
+
+    @media (max-width: 520px) {
+      .controls { grid-template-columns: 1fr; }
+      .status { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
 </head>
 <body>
-  <h1>🟢 Stay Awake & Active</h1>
-  <button id="start">Start</button>
-  <button id="stop">Stop</button>
+  <main class="wrap">
+    <section class="card" aria-live="polite">
+      <div class="header">
+        <div class="title">
+          <div id="dot" class="dot" aria-hidden="true"></div>
+          <h1>Stay Awake</h1>
+        </div>
+        <p class="subtitle" id="subtitle">Idle — click Start to keep your PC awake and gently simulate activity.</p>
+      </div>
 
-  <!-- Hidden background video -->
-  <video id="bgVideo" autoplay loop muted playsinline style="display:none">
-    <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
-  </video>
+      <div class="controls">
+        <button class="start" id="btnStart" aria-label="Start wake lock">
+          <span>Start</span>
+        </button>
+        <button class="stop" id="btnStop" aria-label="Stop wake lock">
+          <span>Stop</span>
+        </button>
+      </div>
+
+      <div class="status">
+        <div class="pill" id="wakeStatus">Wake Lock: off</div>
+        <div class="pill" id="mediaStatus">Media: stopped</div>
+      </div>
+
+      <div class="tip">
+        <span class="kbd">Tip</span> Keep this tab open. If the tab loses focus for long periods, wake lock may be released automatically.
+      </div>
+
+      <pre class="log" id="log" aria-label="Event log"></pre>
+    </section>
+  </main>
+
+  <!-- Inline silent audio (small WAV in a data URI), loops muted to keep the page active -->
+  <audio id="bgAudio" loop muted playsinline preload="auto">
+    <!-- 1-second silent WAV (PCM), tiny data URI -->
+    <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" type="audio/wav" />
+  </audio>
 
   <script>
     let wakeLock = null;
-    const bgVideo = document.getElementById("bgVideo");
+    let running = false;
+
+    const dot = document.getElementById('dot');
+    const subtitle = document.getElementById('subtitle');
+    const wakeStatus = document.getElementById('wakeStatus');
+    const mediaStatus = document.getElementById('mediaStatus');
+    const logEl = document.getElementById('log');
+    const bgAudio = document.getElementById('bgAudio');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent = `[${time}] ${msg}\n` + logEl.textContent;
+    }
+
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) {
+        log('Wake Lock API not supported in this browser.');
+        return null;
+      }
+      try {
+        const wl = await navigator.wakeLock.request('screen');
+        wl.addEventListener('release', () => {
+          log('Wake lock released by the system.');
+          wakeStatus.textContent = 'Wake Lock: released';
+          dot.classList.remove('on');
+        });
+        log('Wake lock acquired.');
+        wakeStatus.textContent = 'Wake Lock: on';
+        dot.classList.add('on');
+        return wl;
+      } catch (err) {
+        log(`Wake lock error: ${err.name} — ${err.message}`);
+        wakeStatus.textContent = 'Wake Lock: error';
+        return null;
+      }
+    }
 
     async function start() {
+      if (running) return;
+      running = true;
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+
+      subtitle.textContent = 'Active — keeping screen on and playing silent media.';
+      dot.classList.add('on');
+
+      // Start wake lock
+      wakeLock = await requestWakeLock();
+
+      // Start background audio (muted, looping)
       try {
-        // Request wake lock
-        wakeLock = await navigator.wakeLock.request("screen");
-        console.log("Wake Lock active");
-
-        // Play hidden video
-        await bgVideo.play();
-        console.log("Background video playing");
+        await bgAudio.play();
+        mediaStatus.textContent = 'Media: playing (muted)';
+        log('Background media playing.');
       } catch (err) {
-        console.error(err);
+        mediaStatus.textContent = 'Media: blocked (click Start)';
+        log(`Media play blocked: ${err.message}`);
       }
     }
 
-    function stop() {
+    async function stop() {
+      if (!running) return;
+      running = false;
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+
+      subtitle.textContent = 'Idle — click Start to keep your PC awake and gently simulate activity.';
+      dot.classList.remove('on');
+
       if (wakeLock) {
-        wakeLock.release();
+        try { await wakeLock.release(); } catch {}
         wakeLock = null;
+        wakeStatus.textContent = 'Wake Lock: off';
+        log('Wake lock released.');
       }
-      bgVideo.pause();
-      console.log("Stopped");
+      try {
+        bgAudio.pause();
+        bgAudio.currentTime = 0;
+        mediaStatus.textContent = 'Media: stopped';
+        log('Background media stopped.');
+      } catch {}
     }
 
-    document.getElementById("start").addEventListener("click", start);
-    document.getElementById("stop").addEventListener("click", stop);
+    // Reacquire wake lock when tab becomes visible again
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible' && running && !wakeLock) {
+        log('Tab visible: attempting to reacquire wake lock.');
+        wakeLock = await requestWakeLock();
+      }
+    });
+
+    // Handle system events that may drop wake lock (e.g., device suspend)
+    window.addEventListener('focus', async () => {
+      if (running && !wakeLock) {
+        log('Window focus: attempting to reacquire wake lock.');
+        wakeLock = await requestWakeLock();
+      }
+    });
+
+    // Buttons
+    btnStart.addEventListener('click', start);
+    btnStop.addEventListener('click', stop);
+
+    // Initial state
+    btnStop.disabled = true;
+    wakeStatus.textContent = 'Wake Lock: off';
+    mediaStatus.textContent = 'Media: stopped';
   </script>
 </body>
 </html>
