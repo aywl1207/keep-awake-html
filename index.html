@@ -51,7 +51,6 @@
     }
 
     .wrap { width: 100%; max-width: 720px; }
-
     .card {
       background: var(--card);
       border-radius: 20px;
@@ -59,14 +58,11 @@
       overflow: hidden;
       border: 1px solid rgba(255,255,255,0.06);
     }
-
     .header {
       padding: 24px 24px 16px;
       background: linear-gradient(180deg, var(--bg-soft), transparent 70%);
     }
-
     .title { display: flex; align-items: center; gap: 12px; }
-
     .dot {
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--danger);
@@ -74,9 +70,7 @@
       transition: all 200ms ease;
     }
     .dot.on { background: var(--primary); box-shadow: 0 0 0 6px var(--ring); }
-
     h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
-
     .subtitle { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 
     .controls {
@@ -85,7 +79,6 @@
       gap: 14px;
       padding: 16px 24px 8px;
     }
-
     button {
       appearance: none;
       border: none;
@@ -100,21 +93,18 @@
       justify-content: center;
       gap: 10px;
     }
-
     .start {
       background: var(--primary);
       color: #0c1a10;
       box-shadow: 0 8px 16px rgba(0, 200, 83, 0.25);
     }
     .start:hover { background: var(--primary-600); }
-    .start:active { transform: translateY(1px); }
-
+    .start:active, .stop:active { transform: translateY(1px); }
     .stop {
       background: #ff5252;
       color: #fff;
       box-shadow: 0 8px 16px rgba(229, 57, 53, 0.25);
     }
-    .stop:active { transform: translateY(1px); }
 
     .status {
       display: flex;
@@ -123,7 +113,6 @@
       gap: 12px;
       padding: 12px 24px 20px;
     }
-
     .pill {
       border: 1px solid rgba(255,255,255,0.1);
       background: rgba(255,255,255,0.03);
@@ -132,7 +121,6 @@
       padding: 8px 12px;
       font-size: 13px;
     }
-
     .log {
       max-height: 140px;
       overflow: auto;
@@ -145,14 +133,12 @@
       font-size: 13px;
       color: var(--muted);
     }
-
     .tip {
       margin-top: 14px;
       color: var(--muted);
       font-size: 13px;
       padding: 0 24px 18px;
     }
-
     .kbd {
       padding: 2px 6px;
       border-radius: 6px;
@@ -205,6 +191,7 @@
   <script>
     let wakeLock = null;
     let running = false;
+    let busy = false; // prevent rapid toggle races
 
     const dot = document.getElementById('dot');
     const subtitle = document.getElementById('subtitle');
@@ -232,7 +219,7 @@
           log('Wake lock released by the system.');
           wakeStatus.textContent = 'Wake Lock: released';
           dot.classList.remove('on');
-          // Reflect system release in UI state
+          // Reflect system release in UI state; do not pause audio here to avoid play/pause race.
           running = false;
           btn.classList.remove('stop');
           btn.classList.add('start');
@@ -250,34 +237,61 @@
       }
     }
 
-    async function start() {
-      if (running) return;
-      running = true;
-
-      // Button -> Stop style
-      btn.classList.remove('start');
-      btn.classList.add('stop');
-      btnLabel.textContent = 'Stop';
-
-      subtitle.textContent = 'Active — keeping screen on and playing silent media.';
-      dot.classList.add('on');
-
-      // Start wake lock
-      wakeLock = await requestWakeLock();
-
-      // Start background audio (muted, looping)
+    async function ensureAudioPlaying() {
       try {
+        // Reset minimal state to avoid stalled playback
+        bgAudio.muted = true;
+        bgAudio.volume = 0;
+        // If already playing, do nothing
+        if (!bgAudio.paused) {
+          mediaStatus.textContent = 'Media: playing (muted)';
+          return;
+        }
         await bgAudio.play();
         mediaStatus.textContent = 'Media: playing (muted)';
         log('Background media playing.');
       } catch (err) {
-        mediaStatus.textContent = 'Media: blocked (click Start)';
         log(`Media play blocked: ${err.message}`);
+        mediaStatus.textContent = 'Media: blocked — retrying...';
+        // Retry once shortly after, to recover from transient pause interruptions
+        setTimeout(async () => {
+          if (running) {
+            try {
+              await bgAudio.play();
+              mediaStatus.textContent = 'Media: playing (muted)';
+              log('Background media resumed after retry.');
+            } catch (err2) {
+              log(`Media still blocked: ${err2.message}`);
+              mediaStatus.textContent = 'Media: blocked';
+            }
+          }
+        }, 400);
       }
     }
 
+    async function start() {
+      if (running || busy) return;
+      busy = true;
+
+      // Button -> Stop style immediately (user feedback)
+      btn.classList.remove('start');
+      btn.classList.add('stop');
+      btnLabel.textContent = 'Stop';
+      subtitle.textContent = 'Active — keeping screen on and playing silent media.';
+
+      // Start audio first (tied to user gesture) to satisfy autoplay policies
+      await ensureAudioPlaying();
+
+      // Then request wake lock
+      wakeLock = await requestWakeLock();
+
+      running = true;
+      busy = false;
+    }
+
     async function stop() {
-      if (!running) return;
+      if (!running || busy) return;
+      busy = true;
       running = false;
 
       // Button -> Start style
@@ -288,42 +302,65 @@
       subtitle.textContent = 'Idle — click Start to keep your PC awake and gently simulate activity.';
       dot.classList.remove('on');
 
+      // Release wake lock
       if (wakeLock) {
         try { await wakeLock.release(); } catch {}
         wakeLock = null;
         wakeStatus.textContent = 'Wake Lock: off';
         log('Wake lock released.');
       }
+
+      // Stop audio cleanly (no immediate currentTime reset to avoid race)
       try {
         bgAudio.pause();
-        bgAudio.currentTime = 0;
         mediaStatus.textContent = 'Media: stopped';
+        // Reset the position slightly later to avoid interrupting a pending play()
+        setTimeout(() => { try { bgAudio.currentTime = 0; } catch {} }, 200);
         log('Background media stopped.');
       } catch {}
+
+      busy = false;
     }
 
-    // Toggle handler
+    // Toggle handler with debounce
     btn.addEventListener('click', () => {
-      if (running) {
-        stop();
-      } else {
-        start();
-      }
+      if (busy) return;
+      if (running) stop();
+      else start();
     });
 
-    // Reacquire wake lock when tab becomes visible again
+    // Reacquire wake lock and media when tab becomes visible again
     document.addEventListener('visibilitychange', async () => {
-      if (document.visibilityState === 'visible' && running && !wakeLock) {
-        log('Tab visible: attempting to reacquire wake lock.');
-        wakeLock = await requestWakeLock();
+      if (document.visibilityState === 'visible') {
+        if (running && !wakeLock) {
+          log('Tab visible: attempting to reacquire wake lock.');
+          wakeLock = await requestWakeLock();
+        }
+        if (running && bgAudio.paused) {
+          log('Tab visible: resuming background media.');
+          await ensureAudioPlaying();
+        }
       }
     });
 
-    // Handle window focus (e.g., after power events)
+    // Handle window focus (e.g., after power events) similarly
     window.addEventListener('focus', async () => {
       if (running && !wakeLock) {
         log('Window focus: attempting to reacquire wake lock.');
         wakeLock = await requestWakeLock();
+      }
+      if (running && bgAudio.paused) {
+        log('Window focus: resuming background media.');
+        await ensureAudioPlaying();
+      }
+    });
+
+    // Monitor audio state; auto-recover if paused unexpectedly
+    bgAudio.addEventListener('pause', () => {
+      if (running) {
+        mediaStatus.textContent = 'Media: paused — recovering...';
+        // Attempt recovery after brief delay
+        setTimeout(() => { if (running) ensureAudioPlaying(); }, 250);
       }
     });
 
