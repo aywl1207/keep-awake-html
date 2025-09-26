@@ -161,7 +161,9 @@
           <div id="dot" class="dot" aria-hidden="true"></div>
           <h1>Stay Awake</h1>
         </div>
-        <p class="subtitle" id="subtitle">Idle — click Start to keep your PC awake and gently simulate activity.</p>
+        <p class="subtitle" id="subtitle">
+          Idle — click Start to keep your PC awake and gently simulate activity.
+        </p>
       </div>
 
       <div class="controls">
@@ -176,203 +178,153 @@
       </div>
 
       <div class="tip">
-        <span class="kbd">Tip</span> Keep this tab open. If the tab loses focus for long periods, wake lock may be released automatically.
+        <span class="kbd">Tip</span> Keep this tab open.  
+        If the tab loses focus for long periods, wake lock may be released automatically.
       </div>
 
       <pre class="log" id="log" aria-label="Event log"></pre>
     </section>
   </main>
 
-  <!-- Inline silent audio (small WAV in a data URI), loops muted to keep the page active) -->
-  <audio id="bgAudio" loop muted playsinline preload="auto">
-    <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" type="audio/wav" />
-  </audio>
-
   <script>
     let wakeLock = null;
     let running = false;
-    let busy = false; // prevent rapid toggle races
+    let audioCtx, oscillatorNode;
 
-    const dot = document.getElementById('dot');
-    const subtitle = document.getElementById('subtitle');
+    const dot        = document.getElementById('dot');
+    const subtitle   = document.getElementById('subtitle');
     const wakeStatus = document.getElementById('wakeStatus');
-    const mediaStatus = document.getElementById('mediaStatus');
-    const logEl = document.getElementById('log');
-    const bgAudio = document.getElementById('bgAudio');
-    const btn = document.getElementById('btnToggle');
-    const btnLabel = document.getElementById('btnLabel');
+    const mediaStatus= document.getElementById('mediaStatus');
+    const logEl      = document.getElementById('log');
+    const btn        = document.getElementById('btnToggle');
+    const btnLabel   = document.getElementById('btnLabel');
 
     function log(msg) {
       const time = new Date().toLocaleTimeString();
       logEl.textContent = `[${time}] ${msg}\n` + logEl.textContent;
     }
 
+    // Wake Lock helper
     async function requestWakeLock() {
       if (!('wakeLock' in navigator)) {
-        log('Wake Lock API not supported in this browser.');
+        log('Wake Lock API not supported.');
         wakeStatus.textContent = 'Wake Lock: unsupported';
         return null;
       }
       try {
         const wl = await navigator.wakeLock.request('screen');
         wl.addEventListener('release', () => {
-          log('Wake lock released by the system.');
+          log('Wake lock released by system.');
           wakeStatus.textContent = 'Wake Lock: released';
           dot.classList.remove('on');
-          // Reflect system release in UI state; do not pause audio here to avoid play/pause race.
+          // reflect UI state
           running = false;
-          btn.classList.remove('stop');
-          btn.classList.add('start');
+          btn.classList.replace('stop','start');
           btnLabel.textContent = 'Start';
-          subtitle.textContent = 'Idle — click Start to keep your PC awake and gently simulate activity.';
+          subtitle.textContent =
+            'Idle — click Start to keep your PC awake and gently simulate activity.';
         });
         log('Wake lock acquired.');
         wakeStatus.textContent = 'Wake Lock: on';
         dot.classList.add('on');
         return wl;
-      } catch (err) {
-        log(`Wake lock error: ${err.name} — ${err.message}`);
+      } catch(err) {
+        log(`Wake lock error: ${err.message}`);
         wakeStatus.textContent = 'Wake Lock: error';
         return null;
       }
     }
 
-    async function ensureAudioPlaying() {
-      try {
-        // Reset minimal state to avoid stalled playback
-        bgAudio.muted = true;
-        bgAudio.volume = 0;
-        // If already playing, do nothing
-        if (!bgAudio.paused) {
-          mediaStatus.textContent = 'Media: playing (muted)';
-          return;
-        }
-        await bgAudio.play();
-        mediaStatus.textContent = 'Media: playing (muted)';
-        log('Background media playing.');
-      } catch (err) {
-        log(`Media play blocked: ${err.message}`);
-        mediaStatus.textContent = 'Media: blocked — retrying...';
-        // Retry once shortly after, to recover from transient pause interruptions
-        setTimeout(async () => {
-          if (running) {
-            try {
-              await bgAudio.play();
-              mediaStatus.textContent = 'Media: playing (muted)';
-              log('Background media resumed after retry.');
-            } catch (err2) {
-              log(`Media still blocked: ${err2.message}`);
-              mediaStatus.textContent = 'Media: blocked';
-            }
-          }
-        }, 400);
+    // Web Audio: silent oscillator
+    function startSilentAudio() {
+      if (!audioCtx) {
+        audioCtx = new AudioContext();
       }
+      if (!oscillatorNode) {
+        oscillatorNode = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        gain.gain.value = 0;            // fully silent
+        oscillatorNode.connect(gain);
+        gain.connect(audioCtx.destination);
+        oscillatorNode.start();
+      }
+      mediaStatus.textContent = 'Media: playing (silent)';
+      log('Silent audio started.');
     }
 
+    function stopSilentAudio() {
+      if (oscillatorNode) {
+        oscillatorNode.stop();
+        oscillatorNode.disconnect();
+        oscillatorNode = null;
+      }
+      mediaStatus.textContent = 'Media: stopped';
+      log('Silent audio stopped.');
+    }
+
+    // Start / Stop
     async function start() {
-      if (running || busy) return;
-      busy = true;
-
-      // Button -> Stop style immediately (user feedback)
-      btn.classList.remove('start');
-      btn.classList.add('stop');
-      btnLabel.textContent = 'Stop';
-      subtitle.textContent = 'Active — keeping screen on and playing silent media.';
-
-      // Start audio first (tied to user gesture) to satisfy autoplay policies
-      await ensureAudioPlaying();
-
-      // Then request wake lock
-      wakeLock = await requestWakeLock();
-
+      if (running) return;
       running = true;
-      busy = false;
+      btn.classList.replace('start','stop');
+      btnLabel.textContent = 'Stop';
+      subtitle.textContent =
+        'Active — keeping screen on and playing silent media.';
+
+      // 1) kick off audio under user gesture
+      startSilentAudio();
+
+      // 2) then request wake lock
+      wakeLock = await requestWakeLock();
     }
 
     async function stop() {
-      if (!running || busy) return;
-      busy = true;
+      if (!running) return;
       running = false;
 
-      // Button -> Start style
-      btn.classList.remove('stop');
-      btn.classList.add('start');
+      btn.classList.replace('stop','start');
       btnLabel.textContent = 'Start';
-
-      subtitle.textContent = 'Idle — click Start to keep your PC awake and gently simulate activity.';
+      subtitle.textContent =
+        'Idle — click Start to keep your PC awake and gently simulate activity.';
       dot.classList.remove('on');
 
-      // Release wake lock
       if (wakeLock) {
-        try { await wakeLock.release(); } catch {}
+        await wakeLock.release().catch(()=>{});
         wakeLock = null;
         wakeStatus.textContent = 'Wake Lock: off';
         log('Wake lock released.');
       }
 
-      // Stop audio cleanly (no immediate currentTime reset to avoid race)
-      try {
-        bgAudio.pause();
-        mediaStatus.textContent = 'Media: stopped';
-        // Reset the position slightly later to avoid interrupting a pending play()
-        setTimeout(() => { try { bgAudio.currentTime = 0; } catch {} }, 200);
-        log('Background media stopped.');
-      } catch {}
-
-      busy = false;
+      stopSilentAudio();
     }
 
-    // Toggle handler with debounce
     btn.addEventListener('click', () => {
-      if (busy) return;
-      if (running) stop();
-      else start();
+      running ? stop() : start();
     });
 
-    // Reacquire wake lock and media when tab becomes visible again
-    document.addEventListener('visibilitychange', async () => {
-      if (document.visibilityState === 'visible') {
-        if (running && !wakeLock) {
-          log('Tab visible: attempting to reacquire wake lock.');
-          wakeLock = await requestWakeLock();
-        }
-        if (running && bgAudio.paused) {
-          log('Tab visible: resuming background media.');
-          await ensureAudioPlaying();
-        }
-      }
-    });
-
-    // Handle window focus (e.g., after power events) similarly
-    window.addEventListener('focus', async () => {
-      if (running && !wakeLock) {
-        log('Window focus: attempting to reacquire wake lock.');
+    // recover on visibility/focus
+    document.addEventListener('visibilitychange', async ()=>{
+      if (running && !wakeLock && document.visibilityState==='visible') {
+        log('Reacquiring wake lock on visibility.');
         wakeLock = await requestWakeLock();
       }
-      if (running && bgAudio.paused) {
-        log('Window focus: resuming background media.');
-        await ensureAudioPlaying();
+    });
+    window.addEventListener('focus', async ()=>{
+      if (running && !wakeLock) {
+        log('Reacquiring wake lock on focus.');
+        wakeLock = await requestWakeLock();
       }
     });
 
-    // Monitor audio state; auto-recover if paused unexpectedly
-    bgAudio.addEventListener('pause', () => {
-      if (running) {
-        mediaStatus.textContent = 'Media: paused — recovering...';
-        // Attempt recovery after brief delay
-        setTimeout(() => { if (running) ensureAudioPlaying(); }, 250);
-      }
-    });
-
-    // Initial state
-    (function init() {
+    // init UI
+    (()=>{
       btn.classList.add('start');
       btnLabel.textContent = 'Start';
       wakeStatus.textContent = 'Wake Lock: off';
-      mediaStatus.textContent = 'Media: stopped';
+      mediaStatus.textContent= 'Media: stopped';
       dot.classList.remove('on');
       log('Ready — click Start to begin.');
     })();
-  </script>
+    </script>
 </body>
 </html>
